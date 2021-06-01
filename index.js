@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 const tickerIndexes = { USDT: 1, BTC: 2, BNB: 3, BUSD: 4, ETH: 5, DAI: 6 };
 const ANSWERS = require('./src/answers.js');
 const median = require('./src/median.js');
@@ -8,53 +7,120 @@ const puppeteer = require('puppeteer');
 const inquirer = require('inquirer');
 const chalk = require('chalk');
 const log = console.log;
+const TelegramBot = require('node-telegram-bot-api');
+var clients = {};
 
+var requestStop = false;
+var limit = 28.29;
+var currentValue;
+var currentChatId = '';
+
+const token = '1851851427:AAG31OKFZkRaQeL5pdeExUSvQ3yCzZE8pG4';
+const bot = new TelegramBot(token, { polling: true });
+
+bot.onText(/\/start/, (msg) => {
+  bot.sendMessage(msg.chat.id, "To start notifying when UAH more than 28.28 press Start");
+  requestStop = false;
+
+  bot.sendMessage(msg.chat.id, "You can set new limit by command /limit. Example /limit 28.15", {
+    "reply_markup": {
+      "keyboard": [["Start"], ["Stop"]]
+    }
+  });
+
+});
+
+bot.onText(/\Start/, (msg, match) => {
+  const chatId = msg.chat.id;
+  currentChatId = chatId;
+
+  if (!clients[chatId]) {
+    clients[chatId] = { limit: 28.28, enabled: true };
+  }
+  bot.sendMessage(msg.chat.id, "Notifications Enabled!");
+
+});
+
+bot.onText(/\Stop/, (msg, match) => {
+  const chatId = msg.chat.id;
+  if (clients[chatId]) {
+    clients[chatId].enabled = false;
+  bot.sendMessage(msg.chat.id, "Notifications Disabled!");
+  }
+});
+
+bot.onText(/\/limit (.+)/, (msg, match) => {
+  const resp = match[1];
+  const newLimit = parseFloat(resp);
+  if (newLimit) {
+    limit = newLimit;
+    const chatId = msg.chat.id;
+    clients[chatId].limit = newLimit;
+  bot.sendMessage(msg.chat.id, `New limit is ${newLimit}`);
+  }
+
+});
 (async () => {
-  // Introduction message
-  introduction();
-  
-  // Step 1
-  log(`1️⃣  ${chalk.bold.underline(`I have some questions in order to help you \n`)}`);
-  const answers = await inquirer.prompt(ANSWERS);
 
-  // Step 2
-  log(`\n2️⃣  ${chalk.bold.underline(`Wait while I log into binance to collect and analyze your query \n`)}`);
   const browser = await puppeteer.launch({ headless: true, defaultViewport: null, args: [`--window-size=1400,800`] });
-  const ui = new inquirer.ui.BottomBar();
-  const page = await browser.newPage();
-  await page.goto('https://p2p.binance.com/en');
 
-  // Select type
-  ui.updateBottomBar(`📌  ${chalk.grey('Selecting type  ')} ${chalk.bold(answers.operation)} `);
-  log('✅');
-  
-  // Select ticker
-  ui.updateBottomBar(`📌  ${chalk.grey('Selecting crypto')} ${chalk.bold(answers.ticker)} `);
-  await page.goto(`https://p2p.binance.com/en/trade/${answers.operation.toLowerCase()}/${answers.ticker.toLowerCase()}`);
+  const page = await browser.newPage();
+
+  await page.goto(`https://p2p.binance.com/en/trade/${'Sell'.toLowerCase()}/${'USDT'.toLowerCase()}`);
   await page.waitForTimeout(1000);
   log('✅');
 
-  // Step 1 
-  ui.updateBottomBar(`📌  ${chalk.grey('Selecting fiat  ')} ${chalk.bold(answers.fiat)} `);
+
+  var fiat = 'UAH';
+
   await page.waitForSelector('#C2Cfiatfilter_searhbox_fiat');
   await page.click('#C2Cfiatfilter_searhbox_fiat');
   await page.waitForTimeout(1000);
-  await page.waitForSelector(`#${answers.fiat}`);
-  await page.click(`#${answers.fiat}`);
+  await page.waitForSelector(`#${fiat}`);
+  await page.click(`#${fiat}`);
   await page.waitForTimeout(1000);
   log('✅');
+  isNewOrder = true;
+  lastOrder = null;
+  async function multiStep() {
+    https://p2p.binance.com/ru/trade/sell/USDT
+    await page.waitForTimeout(1000);
+    scrape(page).then((value) => {
+      if (value[0]) {
+        log(`3️⃣  ${chalk.bold.underline(`Here are the results of your query \n`)}`);
+        // ui.updateBottomBar('');
+        currentValue = value[0];
+        log(`'Minimum price: '${currentValue.toLocaleString()}`);
+        log(`${'Maximun price: '} ${value[value.length - 1].toLocaleString()}`);
 
-  // Step 2
-  scrape(page).then((value) => {    
-    log(`3️⃣  ${chalk.bold.underline(`Here are the results of your query \n`)}`);
-    ui.updateBottomBar('');
-    browser.close();
-    log(`📉  ${chalk.grey('Minimun price')} 💵 ${chalk.bold(value[0].toLocaleString().replace(/,/g, '.'))}`);
-    log(`🕛  ${chalk.grey('Median price')}  💵 ${chalk.bold(median(value).toLocaleString().replace(/,/g, '.'))}`);
-    log(`📈  ${chalk.grey('Maximun price')} 💵 ${chalk.bold(value[value.length - 1].toLocaleString().replace(/,/g, '.'))}`);
-    log(`🛍  ${chalk.grey('People offering')} ${chalk.bold(value.length.toLocaleString().replace(/,/g, '.'))} \n`);
-    log(`${chalk.grey('Sanchez Marcos')} © 2021`);
-    log(`${chalk.hex('#444')(`"Don't Trust, Verify"`)}`);
-    process.exit(0);
-  });
+
+        for (var key in clients) {
+          var client = clients[key];
+          if (currentValue != client.lastOrder) {
+            client.isNewOrder = true;
+          }
+        }
+
+        for (var key in clients) {
+          var client = clients[key];
+          if (client.isNewOrder && currentValue > client.limit) {
+            if (client.enabled) {
+              bot.sendMessage(key, `Order highter than ${client.limit} was found! - ${currentValue}UAH`);
+            }
+
+            client.isNewOrder = false;
+            client.lastOrder = currentValue;
+          }
+        }
+
+        page.reload({ waitUntil: ["networkidle0", "domcontentloaded"] });
+        var newtime = 8000;
+      }
+      if (!requestStop) {
+        setTimeout(multiStep, newtime);
+      }
+    })
+  }
+
+  await multiStep();
 })();
