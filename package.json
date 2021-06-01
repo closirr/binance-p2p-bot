@@ -35,6 +35,7 @@
   "homepage": "https://github.com/sanchezmarcos/binance-p2p-bot#readme",
   "description": "",
   "dependencies": {
+    "axios": "^0.21.1",
     "chalk": "^4.1.0",
     "inquirer": "^8.0.0",
     "node-telegram-bot-api": "^0.53.0",
